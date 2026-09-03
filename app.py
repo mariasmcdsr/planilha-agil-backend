@@ -12,13 +12,24 @@ EXCEL_PATH = "planilha_atual.xlsx"
 
 def baixar_planilha_do_drive():
     url = f"https://drive.google.com/uc?export=download&id={DRIVE_FILE_ID}"
-    response = requests.get(url, stream=True)
+    session = requests.Session()
+    response = session.get(url, stream=True)
+    
+    # Trata o aviso de vírus do Google Drive para arquivos Excel
+    for key, value in response.cookies.items():
+        if key.startswith('download_warning'):
+            params = {'export': 'download', 'id': DRIVE_FILE_ID, 'confirm': value}
+            response = session.get(url, params=params, stream=True)
+            break
+            
     if response.status_code == 200:
         with open(EXCEL_PATH, 'wb') as f:
             for chunk in response.iter_content(chunk_size=1024):
                 if chunk:
                     f.write(chunk)
-
+    else:
+        raise Exception(f"Erro ao baixar do Drive. Código: {response.status_code}")
+    
 @app.route('/')
 def home():
     return render_template('index.html')
