@@ -3,59 +3,73 @@ import requests
 from flask import Flask, jsonify, request, render_template
 import openpyxl
 from openpyxl.styles import PatternFill
+from datetime import datetime
 
 app = Flask(__name__)
 
-# ID da planilha no Google Drive fornecido
 DRIVE_FILE_ID = "14_9A0gjPBokDpdbw4wYGTepTdQKjbe8u"
 EXCEL_PATH = "planilha_atual.xlsx"
+
+def garantir_planilha():
+    # Se o arquivo não existir localmente, baixa uma única vez para ser instantâneo
+    if not os.path.exists(EXCEL_PATH):
+        baixar_planilha_do_drive()
 
 def baixar_planilha_do_drive():
     url = f"https://drive.google.com/uc?export=download&id={DRIVE_FILE_ID}"
     session = requests.Session()
     response = session.get(url, stream=True)
-    
-    # Trata o aviso de vírus do Google Drive para arquivos Excel
     for key, value in response.cookies.items():
         if key.startswith('download_warning'):
             params = {'export': 'download', 'id': DRIVE_FILE_ID, 'confirm': value}
             response = session.get(url, params=params, stream=True)
             break
-            
     if response.status_code == 200:
         with open(EXCEL_PATH, 'wb') as f:
             for chunk in response.iter_content(chunk_size=1024):
                 if chunk:
                     f.write(chunk)
-    else:
-        raise Exception(f"Erro ao baixar do Drive. Código: {response.status_code}")
-    
+
 @app.route('/')
 def home():
     return render_template('index.html')
 
-@app.route('/api/lancar', methods=['POST'])
-def lancar_pagamento():
-    dados = request.json
-    try:
-        baixar_planilha_do_drive()
-        wb = openpyxl.load_workbook(EXCEL_PATH)
-        sheet = wb.active
-        wb.save(EXCEL_PATH)
-        return jsonify({"mensagem": "Pagamento registrado e planilha atualizada com sucesso!"})
-    except Exception as e:
-        return jsonify({"erro": str(e)}), 500
+@app.route('/api/buscar-cliente', methods=['GET'])
+def buscar_cliente():
+    nome_busca = request.args.get('nome', '').strip()
+    if not nome_busca:
+        return jsonify({"erro": "Informe o nome do cliente"}), 400
+    
+    garantir_planilha()
+    wb = openpyxl.load_workbook(EXCEL_PATH, data_only=True)
+    sheet = wb.active
+    
+    for row in range(5, sheet.max_row + 1):
+        nome = sheet.cell(row=row, column=2).value # Coluna B (Nome)
+        if nome and nome_busca.lower() in str(nome).lower():
+            dados_cliente = {
+                "linha": row,
+                "nome": nome,
+                "contrato": str(sheet.cell(row=row, column=3).value or ""), # Coluna C
+                "quitacao": str(sheet.cell(row=row, column=4).value or ""), # Coluna D
+                "valor_pego": sheet.cell(row=row, column=7).value or 0,    # Exemplo Coluna G
+                "valor_pago": sheet.cell(row=row, column=9).value or 0,    # Exemplo Coluna I
+                "pendente": sheet.cell(row=row, column=11).value or 0,     # Coluna K (Pendente)
+            }
+            return jsonify(dados_cliente)
+            
+    return jsonify({"erro": "Cliente não encontrado!"}), 404
 
 @app.route('/api/lancar-noite', methods=['POST'])
 def lancar_noite():
     dados = request.json
     try:
-        baixar_planilha_do_drive()
+        garantir_planilha()
         wb = openpyxl.load_workbook(EXCEL_PATH)
         sheet = wb.active
         
         linha = dados.get('linha')
-        tipo = dados.get('tipo') 
+        tipo = dados.get('tipo') # "PIX", "ESPECIE", "ATRASO"
         valor = dados.get('valor', 0)
         
         CORES = {
@@ -75,18 +89,17 @@ def lancar_noite():
             
             pendente = sheet.cell(row=linha, column=11).value
             if pendente is not None and float(pendente) <= 0:
-                from datetime import datetime
                 sheet.cell(row=linha, column=4, value=datetime.now().strftime("%d/%m/%Y"))
                 
         elif tipo == "ATRASO":
-            status = dados.get('status', 'A')
+            status = dados.get('status', 'A') # A, AA, AAA, etc.
             sheet.cell(row=linha, column=col_out_vlr, value=status)
             fill = CORES["ATRASO"]
             sheet.cell(row=linha, column=col_aberto).fill = fill
             sheet.cell(row=linha, column=col_out_vlr).fill = fill
 
         wb.save(EXCEL_PATH)
-        return jsonify({"mensagem": "Lançamento noturno realizado com sucesso!"})
+        return jsonify({"mensagem": "Lançamento realizado instantaneamente!"})
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
 
@@ -94,29 +107,23 @@ def lancar_noite():
 def lancar_manha():
     dados = request.json
     try:
-        baixar_planilha_do_drive()
+        baixar_planilha_do_drive() # Na manhã atualizamos baixando a matriz fresca do Drive
         wb = openpyxl.load_workbook(EXCEL_PATH)
         
         aba_ativa = wb.active
-        nova_data = dados.get('nova_data', '04/09/2026')
+        nova_data = dados.get('nova_data', datetime.now().strftime("%d/%m"))
         nova_aba = wb.copy_worksheet(aba_ativa)
         nova_aba.title = f"CAIXA 07 BSB {nova_data}"
         
         COR_QUITADO = PatternFill(start_color="FFE599", end_color="FFE599", fill_type="solid")
-        COR_NOVO = PatternFill(start_color="1155CC", end_color="1155CC", fill_type="solid")
         
+        # Move quitados para baixo e pinta de amarelo
         for row in range(5, nova_aba.max_row + 1):
             pendente = nova_aba.cell(row=row, column=11).value
             if pendente is not None and float(pendente) == 0:
                 for col in range(2, 15):
                     nova_aba.cell(row=row, column=col).fill = COR_QUITADO
                     
-        novo_cliente = dados.get('novo_cliente')
-        if novo_cliente:
-            linha_nova = novo_cliente.get('linha')
-            nova_aba.cell(row=linha_nova, column=2, value=novo_cliente.get('nome'))
-            nova_aba.cell(row=linha_nova, column=2).fill = COR_NOVO
-
         wb.save(EXCEL_PATH)
         return jsonify({"mensagem": "Rotina da manhã executada com sucesso!"})
     except Exception as e:
