@@ -7,7 +7,7 @@ from openpyxl.styles import PatternFill
 app = Flask(__name__)
 
 # ID da planilha no Google Drive fornecido
-DRIVE_FILE_ID = "1927744103"
+DRIVE_FILE_ID = "14_9A0gjPBokDpdbw4wYGTepTdQKjbe8u"
 EXCEL_PATH = "planilha_atual.xlsx"
 
 def baixar_planilha_do_drive():
