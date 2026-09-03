@@ -23,10 +23,6 @@ def baixar_planilha_do_drive():
 def home():
     return render_template('index.html')
 
-@app.route('/')
-def home():
-    return jsonify({"status": "PlanilhaÁgil Backend Online e Conectado!"})
-
 @app.route('/api/lancar', methods=['POST'])
 def lancar_pagamento():
     dados = request.json
