@@ -10,10 +10,30 @@ app = Flask(__name__)
 DRIVE_FILE_ID = "14_9A0gjPBokDpdbw4wYGTepTdQKjbe8u"
 EXCEL_PATH = "planilha_atual.xlsx"
 
-def garantir_planilha():
-    # Se o arquivo não existir localmente, baixa uma única vez para ser instantâneo
+# Cache em memória para busca instantânea
+CACHE_CLIENTES = []
+
+def carregar_cache():
+    global CACHE_CLIENTES
     if not os.path.exists(EXCEL_PATH):
         baixar_planilha_do_drive()
+    
+    wb = openpyxl.load_workbook(EXCEL_PATH, data_only=True)
+    sheet = wb.active
+    
+    CACHE_CLIENTES = []
+    for row in range(5, sheet.max_row + 1):
+        nome = sheet.cell(row=row, column=2).value # Coluna B (Nome)
+        if nome:
+            CACHE_CLIENTES.append({
+                "linha": row,
+                "nome": str(nome),
+                "contrato": str(sheet.cell(row=row, column=3).value or ""),
+                "quitacao": str(sheet.cell(row=row, column=4).value or ""),
+                "valor_pego": sheet.cell(row=row, column=7).value or 0,
+                "valor_pago": sheet.cell(row=row, column=9).value or 0,
+                "pendente": sheet.cell(row=row, column=11).value or 0,
+            })
 
 def baixar_planilha_do_drive():
     url = f"https://drive.google.com/uc?export=download&id={DRIVE_FILE_ID}"
@@ -29,6 +49,7 @@ def baixar_planilha_do_drive():
             for chunk in response.iter_content(chunk_size=1024):
                 if chunk:
                     f.write(chunk)
+    carregar_cache()
 
 @app.route('/')
 def home():
@@ -40,23 +61,13 @@ def buscar_cliente():
     if not nome_busca:
         return jsonify({"erro": "Informe o nome do cliente"}), 400
     
-    garantir_planilha()
-    wb = openpyxl.load_workbook(EXCEL_PATH, data_only=True)
-    sheet = wb.active
-    
-    for row in range(5, sheet.max_row + 1):
-        nome = sheet.cell(row=row, column=2).value # Coluna B (Nome)
-        if nome and nome_busca.lower() in str(nome).lower():
-            dados_cliente = {
-                "linha": row,
-                "nome": nome,
-                "contrato": str(sheet.cell(row=row, column=3).value or ""), # Coluna C
-                "quitacao": str(sheet.cell(row=row, column=4).value or ""), # Coluna D
-                "valor_pego": sheet.cell(row=row, column=7).value or 0,    # Exemplo Coluna G
-                "valor_pago": sheet.cell(row=row, column=9).value or 0,    # Exemplo Coluna I
-                "pendente": sheet.cell(row=row, column=11).value or 0,     # Coluna K (Pendente)
-            }
-            return jsonify(dados_cliente)
+    # Se o cache estiver vazio por reinicialização, carrega na hora
+    if not CACHE_CLIENTES:
+        carregar_cache()
+        
+    for cliente in CACHE_CLIENTES:
+        if nome_busca.lower() in cliente['nome'].lower():
+            return jsonify(cliente)
             
     return jsonify({"erro": "Cliente não encontrado!"}), 404
 
@@ -64,12 +75,14 @@ def buscar_cliente():
 def lancar_noite():
     dados = request.json
     try:
-        garantir_planilha()
+        if not os.path.exists(EXCEL_PATH):
+            baixar_planilha_do_drive()
+            
         wb = openpyxl.load_workbook(EXCEL_PATH)
         sheet = wb.active
         
         linha = dados.get('linha')
-        tipo = dados.get('tipo') # "PIX", "ESPECIE", "ATRASO"
+        tipo = dados.get('tipo') 
         valor = dados.get('valor', 0)
         
         CORES = {
@@ -87,18 +100,26 @@ def lancar_noite():
             sheet.cell(row=linha, column=col_aberto).fill = fill
             sheet.cell(row=linha, column=col_out_vlr).fill = fill
             
-            pendente = sheet.cell(row=linha, column=11).value
-            if pendente is not None and float(pendente) <= 0:
+            pendente_cell = sheet.cell(row=linha, column=11)
+            if pendente_cell.value is not None:
+                try:
+                    novo_pendente = float(pendente_cell.value) - float(valor)
+                    pendente_cell.value = novo_pendente
+                except:
+                    pass
+                    
+            if pendente_cell.value is not None and float(pendente_cell.value) <= 0:
                 sheet.cell(row=linha, column=4, value=datetime.now().strftime("%d/%m/%Y"))
                 
         elif tipo == "ATRASO":
-            status = dados.get('status', 'A') # A, AA, AAA, etc.
+            status = dados.get('status', 'A')
             sheet.cell(row=linha, column=col_out_vlr, value=status)
             fill = CORES["ATRASO"]
             sheet.cell(row=linha, column=col_aberto).fill = fill
             sheet.cell(row=linha, column=col_out_vlr).fill = fill
 
         wb.save(EXCEL_PATH)
+        carregar_cache() # Atualiza o cache instantaneamente após salvar
         return jsonify({"mensagem": "Lançamento realizado instantaneamente!"})
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
@@ -107,7 +128,7 @@ def lancar_noite():
 def lancar_manha():
     dados = request.json
     try:
-        baixar_planilha_do_drive() # Na manhã atualizamos baixando a matriz fresca do Drive
+        baixar_planilha_do_drive()
         wb = openpyxl.load_workbook(EXCEL_PATH)
         
         aba_ativa = wb.active
@@ -117,7 +138,6 @@ def lancar_manha():
         
         COR_QUITADO = PatternFill(start_color="FFE599", end_color="FFE599", fill_type="solid")
         
-        # Move quitados para baixo e pinta de amarelo
         for row in range(5, nova_aba.max_row + 1):
             pendente = nova_aba.cell(row=row, column=11).value
             if pendente is not None and float(pendente) == 0:
@@ -125,6 +145,7 @@ def lancar_manha():
                     nova_aba.cell(row=row, column=col).fill = COR_QUITADO
                     
         wb.save(EXCEL_PATH)
+        carregar_cache()
         return jsonify({"mensagem": "Rotina da manhã executada com sucesso!"})
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
