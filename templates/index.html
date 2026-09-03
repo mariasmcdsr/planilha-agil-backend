@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PlanilhaÁgil</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-white min-h-screen flex flex-col items-center justify-between p-4">
+    <div class="w-full max-w-md bg-slate-800 rounded-2xl shadow-xl p-6 space-y-6">
+        <div class="text-center">
+            <h1 class="text-2xl font-bold text-emerald-400">PlanilhaÁgil</h1>
+            <p class="text-slate-400 text-sm">Automação Financeira BSB</p>
+        </div>
+
+        <!-- Seção Manhã -->
+        <div class="space-y-2">
+            <h2 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Rotina da Manhã</h2>
+            <button onclick="executarManha()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-3 px-4 rounded-xl transition shadow-lg">
+                🌅 Executar Atualizado (Manhã)
+            </button>
+        </div>
+
+        <!-- Seção Noite -->
+        <div class="space-y-3 pt-2 border-t border-slate-700">
+            <h2 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Recolhimento Noturno</h2>
+            <div class="grid grid-cols-2 gap-2">
+                <button onclick="lancar('PIX')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2.5 px-3 rounded-xl text-sm transition">
+                    🟢 PIX / Depósito
+                </button>
+                <button onclick="lancar('ESPECIE')" class="bg-purple-600 hover:bg-purple-500 text-white font-medium py-2.5 px-3 rounded-xl text-sm transition">
+                    🟣 Espécie (Motoboy)
+                </button>
+            </div>
+            <button onclick="lancar('ATRASO')" class="w-full bg-red-600 hover:bg-red-500 text-white font-medium py-2.5 px-3 rounded-xl text-sm transition">
+                🔴 Marcar Atraso (A/AA/AAA)
+            </button>
+        </div>
+
+        <!-- Status / Resposta -->
+        <div id="status" class="text-center text-xs text-slate-400 min-h-[20px]"></div>
+    </div>
+
+    <script>
+        async function executarManha() {
+            document.getElementById('status').innerText = "Executando rotina da manhã...";
+            let res = await fetch('/api/lancar-manha', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({nova_data: "04/09/2026"})
+            });
+            let data = await res.json();
+            document.getElementById('status').innerText = data.mensagem || data.erro;
+        }
+
+        async function lancar(tipo) {
+            let linha = prompt("Digite o número da linha do cliente:");
+            if (!linha) return;
+            
+            let valor = 0;
+            if (tipo !== 'ATRASO') {
+                let valStr = prompt("Digite o valor recebido (R$):");
+                if (!valStr) return;
+                valor = parseFloat(valStr);
+            }
+
+            document.getElementById('status').innerText = "Processando lançamento...";
+            let res = await fetch('/api/lancar-noite', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({linha: parseInt(linha), tipo: tipo, valor: valor})
+            });
+            let data = await res.json();
+            document.getElementById('status').innerText = data.mensagem || data.erro;
+        }
+    </script>
+</body>
+</html>

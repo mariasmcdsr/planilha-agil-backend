@@ -1,6 +1,6 @@
 import os
 import requests
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, render_template
 import openpyxl
 from openpyxl.styles import PatternFill
 
@@ -18,6 +18,10 @@ def baixar_planilha_do_drive():
             for chunk in response.iter_content(chunk_size=1024):
                 if chunk:
                     f.write(chunk)
+
+@app.route('/')
+def home():
+    return render_template('index.html')
 
 @app.route('/')
 def home():
