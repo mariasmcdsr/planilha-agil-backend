@@ -28,11 +28,12 @@ def carregar_cache():
             CACHE_CLIENTES.append({
                 "linha": row,
                 "nome": str(nome),
-                "contrato": str(sheet.cell(row=row, column=3).value or ""),
-                "quitacao": str(sheet.cell(row=row, column=4).value or ""),
-                "valor_pego": sheet.cell(row=row, column=7).value or 0,
-                "valor_pago": sheet.cell(row=row, column=9).value or 0,
-                "pendente": sheet.cell(row=row, column=11).value or 0,
+                "contrato": str(sheet.cell(row=row, column=3).value or ""),  # Coluna C
+                "quitacao": str(sheet.cell(row=row, column=4).value or ""),  # Coluna D
+                "valor_pego": sheet.cell(row=row, column=6).value or 0,     # Coluna F (Vlr Solicitado)
+                "valor_pago": sheet.cell(row=row, column=10).value or 0,    # Coluna J (Pago)
+                "pendente": sheet.cell(row=row, column=11).value or 0,    # Coluna K (Pendente)
+                "multas": sheet.cell(row=row, column=12).value or 0,      # Coluna L (Multas)
             })
 
 def baixar_planilha_do_drive():
@@ -57,16 +58,16 @@ def home():
 
 @app.route('/api/buscar-cliente', methods=['GET'])
 def buscar_cliente():
-    nome_busca = request.args.get('nome', '').strip()
+    nome_busca = request.args.get('nome', '').strip().lower()
     if not nome_busca:
         return jsonify({"erro": "Informe o nome do cliente"}), 400
     
-    # Se o cache estiver vazio por reinicialização, carrega na hora
     if not CACHE_CLIENTES:
         carregar_cache()
         
     for cliente in CACHE_CLIENTES:
-        if nome_busca.lower() in cliente['nome'].lower():
+        partes_nome = cliente['nome'].lower().split()
+        if any(p.startswith(nome_busca) or nome_busca in p for p in partes_nome):
             return jsonify(cliente)
             
     return jsonify({"erro": "Cliente não encontrado!"}), 404
@@ -100,14 +101,21 @@ def lancar_noite():
             sheet.cell(row=linha, column=col_aberto).fill = fill
             sheet.cell(row=linha, column=col_out_vlr).fill = fill
             
-            pendente_cell = sheet.cell(row=linha, column=11)
-            if pendente_cell.value is not None:
-                try:
+            pago_cell = sheet.cell(row=linha, column=10)   # Coluna J (Pago)
+            pendente_cell = sheet.cell(row=linha, column=11) # Coluna K (Pendente)
+            
+            try:
+                if pago_cell.value is not None:
+                    pago_cell.value = float(pago_cell.value) + float(valor)
+                else:
+                    pago_cell.value = float(valor)
+                    
+                if pendente_cell.value is not None:
                     novo_pendente = float(pendente_cell.value) - float(valor)
                     pendente_cell.value = novo_pendente
-                except:
-                    pass
-                    
+            except:
+                pass
+                
             if pendente_cell.value is not None and float(pendente_cell.value) <= 0:
                 sheet.cell(row=linha, column=4, value=datetime.now().strftime("%d/%m/%Y"))
                 
@@ -119,7 +127,7 @@ def lancar_noite():
             sheet.cell(row=linha, column=col_out_vlr).fill = fill
 
         wb.save(EXCEL_PATH)
-        carregar_cache() # Atualiza o cache instantaneamente após salvar
+        carregar_cache() 
         return jsonify({"mensagem": "Lançamento realizado instantaneamente!"})
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
@@ -149,6 +157,12 @@ def lancar_manha():
         return jsonify({"mensagem": "Rotina da manhã executada com sucesso!"})
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
+
+try:
+    carregar_cache()
+    print("Planilha carregada na memória com sucesso!")
+except Exception as e:
+    print("Erro ao carregar cache inicial:", e)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
