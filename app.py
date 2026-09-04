@@ -16,14 +16,18 @@ CACHE_CLIENTES = []
 def extrair_numero(val):
     if val is None: return 0.0
     if isinstance(val, (int, float)): return float(val)
-    val_str = str(val).strip()
-    if val_str.startswith('='): return 0.0 # Ignora fórmulas não calculadas
     
-    val_str = re.sub(r'[^\d,\.-]', '', val_str)
+    val_str = str(val).split('-')[0].strip()
+    if val_str.startswith('='): return 0.0 # Se for fórmula, vamos usar a inteligência do cache
+    
+    val_str = re.sub(r'[^\d,\.]', '', val_str)
+    if not val_str: return 0.0
+    
     if '.' in val_str and ',' in val_str:
         val_str = val_str.replace('.', '').replace(',', '.')
     elif ',' in val_str:
         val_str = val_str.replace(',', '.')
+        
     try:
         return float(val_str)
     except:
@@ -33,37 +37,12 @@ def formatar_data(val):
     if not val: return ""
     if isinstance(val, datetime):
         return val.strftime("%d/%m/%Y")
-    return str(val).split(' ')[0] # Remove os 00:00:00 se houver
-
-def carregar_cache():
-    global CACHE_CLIENTES
-    if not os.path.exists(EXCEL_PATH):
-        baixar_planilha_do_drive()
-    
-    # data_only=True garante que ele tente pegar o valor final e não a fórmula em texto
-    wb = openpyxl.load_workbook(EXCEL_PATH, data_only=True)
-    sheet = wb.active
-    
-    CACHE_CLIENTES = []
-    for row in range(5, sheet.max_row + 1):
-        col_a = sheet.cell(row=row, column=1).value
-        nome = sheet.cell(row=row, column=2).value
-        
-        if not nome or col_a is None or not str(col_a).strip().isdigit():
-            continue
-            
-        CACHE_CLIENTES.append({
-            "linha": row,
-            "nome": str(nome).strip(),
-            "contrato": str(sheet.cell(row=row, column=3).value or ""),
-            "valor_pego": extrair_numero(sheet.cell(row=row, column=6).value),    # Coluna F
-            "valor_parcela": extrair_numero(sheet.cell(row=row, column=8).value), # Coluna H
-            "valor_pago": extrair_numero(sheet.cell(row=row, column=10).value),   # Coluna J
-            "pendente": extrair_numero(sheet.cell(row=row, column=11).value),     # Coluna K
-            "multas": extrair_numero(sheet.cell(row=row, column=12).value),       # Coluna L
-            "data_inicio": formatar_data(sheet.cell(row=row, column=13).value),   # Coluna M
-            "data_fim": formatar_data(sheet.cell(row=row, column=14).value)       # Coluna N
-        })
+    val_str = str(val).split(' ')[0]
+    if '-' in val_str:
+        p = val_str.split('-')
+        if len(p) == 3 and len(p[0]) == 4:
+            return f"{p[2]}/{p[1]}/{p[0]}"
+    return val_str
 
 def baixar_planilha_do_drive():
     url = f"https://drive.google.com/uc?export=download&id={DRIVE_FILE_ID}"
@@ -79,7 +58,35 @@ def baixar_planilha_do_drive():
             for chunk in response.iter_content(chunk_size=1024):
                 if chunk:
                     f.write(chunk)
-    carregar_cache()
+
+def carregar_cache():
+    global CACHE_CLIENTES
+    if not os.path.exists(EXCEL_PATH):
+        baixar_planilha_do_drive()
+    
+    wb = openpyxl.load_workbook(EXCEL_PATH, data_only=True)
+    sheet = wb.active
+    
+    CACHE_CLIENTES = []
+    for row in range(5, sheet.max_row + 1):
+        col_a = sheet.cell(row=row, column=1).value
+        nome = sheet.cell(row=row, column=2).value
+        
+        if not nome or col_a is None or not str(col_a).strip().isdigit():
+            continue
+            
+        CACHE_CLIENTES.append({
+            "linha": row,
+            "nome": str(nome).strip(),
+            "contrato": str(sheet.cell(row=row, column=3).value or ""),
+            "valor_pego": extrair_numero(sheet.cell(row=row, column=6).value),
+            "valor_parcela": extrair_numero(sheet.cell(row=row, column=8).value),
+            "valor_pago": extrair_numero(sheet.cell(row=row, column=10).value),
+            "pendente": extrair_numero(sheet.cell(row=row, column=11).value),
+            "multas": extrair_numero(sheet.cell(row=row, column=12).value),
+            "data_inicio": formatar_data(sheet.cell(row=row, column=13).value),
+            "data_fim": formatar_data(sheet.cell(row=row, column=14).value)
+        })
 
 @app.route('/')
 def home():
@@ -107,6 +114,7 @@ def lancar_noite():
     try:
         if not os.path.exists(EXCEL_PATH):
             baixar_planilha_do_drive()
+            carregar_cache()
             
         wb = openpyxl.load_workbook(EXCEL_PATH)
         sheet = wb.active
@@ -128,7 +136,6 @@ def lancar_noite():
         col_aberto = col_out_vlr - 1
         
         if tipo in ["PIX", "ESPECIE", "SEMANAL"]:
-            # Se for semanal e tiver texto, lança o texto (ex: 75 - Sexta). Se não, lança o número.
             valor_final_planilha = texto if tipo == "SEMANAL" else valor_num
             sheet.cell(row=linha, column=col_out_vlr, value=valor_final_planilha)
             
@@ -136,16 +143,32 @@ def lancar_noite():
             sheet.cell(row=linha, column=col_aberto).fill = fill
             sheet.cell(row=linha, column=col_out_vlr).fill = fill
             
-            # Tenta atualizar fisicamente as células 10 e 11 se NÃO forem fórmulas
-            pago_cell = sheet.cell(row=linha, column=10)
-            if not str(pago_cell.value).startswith('='):
-                pago_cell.value = extrair_numero(pago_cell.value) + valor_num
+            # Puxa o valor correto armazenado na memória, e não a fórmula do Excel
+            pago_atual = 0
+            pendente_atual = 0
+            cliente_alvo = None
+            
+            for cliente in CACHE_CLIENTES:
+                if cliente['linha'] == linha:
+                    pago_atual = cliente['valor_pago']
+                    pendente_atual = cliente['pendente']
+                    cliente_alvo = cliente
+                    break
+                    
+            novo_pago = pago_atual + valor_num
+            novo_pendente = pendente_atual - valor_num
+            
+            # Escreve NÚMEROS ABSOLUTOS nas colunas Pago (10) e Pendente (11) ignorando a fórmula antiga
+            sheet.cell(row=linha, column=10, value=novo_pago)
+            sheet.cell(row=linha, column=11, value=novo_pendente)
+            
+            if novo_pendente <= 0:
+                sheet.cell(row=linha, column=4, value=datetime.now().strftime("%d/%m/%Y"))
                 
-            pendente_cell = sheet.cell(row=linha, column=11)
-            if not str(pendente_cell.value).startswith('='):
-                pendente_cell.value = extrair_numero(pendente_cell.value) - valor_num
-                if pendente_cell.value <= 0:
-                    sheet.cell(row=linha, column=4, value=datetime.now().strftime("%d/%m/%Y"))
+            # Atualiza também a memória para tela mostrar instantaneamente a soma
+            if cliente_alvo:
+                cliente_alvo['valor_pago'] = novo_pago
+                cliente_alvo['pendente'] = novo_pendente
 
         elif tipo == "ATRASO":
             status = dados.get('status', 'A')
@@ -161,15 +184,6 @@ def lancar_noite():
             sheet.cell(row=linha, column=col_out_vlr).fill = fill
 
         wb.save(EXCEL_PATH)
-
-        # ATUALIZA A MEMÓRIA NA HORA PARA O CELULAR SOMAR CORRETAMENTE!
-        for cliente in CACHE_CLIENTES:
-            if cliente['linha'] == linha:
-                if tipo in ["PIX", "ESPECIE", "SEMANAL"]:
-                    cliente['valor_pago'] += valor_num
-                    cliente['pendente'] -= valor_num
-                break
-                
         return jsonify({"mensagem": "Lançamento realizado instantaneamente!"})
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
@@ -189,8 +203,8 @@ def lancar_manha():
         COR_QUITADO = PatternFill(start_color="FFE599", end_color="FFE599", fill_type="solid")
         
         for row in range(5, nova_aba.max_row + 1):
-            pendente = nova_aba.cell(row=row, column=11).value
-            if pendente is not None and extrair_numero(pendente) <= 0:
+            pendente = extrair_numero(nova_aba.cell(row=row, column=11).value)
+            if pendente <= 0:
                 for col in range(2, 15):
                     nova_aba.cell(row=row, column=col).fill = COR_QUITADO
                     
