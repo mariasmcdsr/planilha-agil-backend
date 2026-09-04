@@ -10,7 +10,6 @@ app = Flask(__name__)
 DRIVE_FILE_ID = "14_9A0gjPBokDpdbw4wYGTepTdQKjbe8u"
 EXCEL_PATH = "planilha_atual.xlsx"
 
-# Cache em memória para busca instantânea
 CACHE_CLIENTES = []
 
 def carregar_cache():
@@ -23,18 +22,46 @@ def carregar_cache():
     
     CACHE_CLIENTES = []
     for row in range(5, sheet.max_row + 1):
-        nome = sheet.cell(row=row, column=2).value # Coluna B (Nome)
-        if nome:
-            CACHE_CLIENTES.append({
-                "linha": row,
-                "nome": str(nome),
-                "contrato": str(sheet.cell(row=row, column=3).value or ""),  # Coluna C
-                "quitacao": str(sheet.cell(row=row, column=4).value or ""),  # Coluna D
-                "valor_pego": sheet.cell(row=row, column=6).value or 0,     # Coluna F (Vlr Solicitado)
-                "valor_pago": sheet.cell(row=row, column=10).value or 0,    # Coluna J (Pago)
-                "pendente": sheet.cell(row=row, column=11).value or 0,    # Coluna K (Pendente)
-                "multas": sheet.cell(row=row, column=12).value or 0,      # Coluna L (Multas)
-            })
+        col_a = sheet.cell(row=row, column=1).value
+        nome = sheet.cell(row=row, column=2).value
+        
+        # Ignora cabeçalhos e linhas de categorias (como COBRADOR, SUMIDOS, NEGOCIADOS, etc.)
+        if not nome or col_a is None or not str(col_a).strip().isdigit():
+            continue
+            
+        # Calcula o valor pago somando as colunas diárias (da coluna 15 em diante) para garantir precisão exata
+        vlr_pago_calc = 0
+        for col in range(15, sheet.max_column + 1):
+            val = sheet.cell(row=row, column=col).value
+            try:
+                if val is not None and isinstance(val, (int, float)):
+                    vlr_pago_calc += float(val)
+                elif val is not None and str(val).replace('.', '', 1).isdigit():
+                    vlr_pago_calc += float(val)
+            except:
+                pass
+
+        total = sheet.cell(row=row, column=9).value or 0 # Coluna I (Total)
+        try:
+            total_num = float(total)
+        except:
+            total_num = 0
+
+        pendente_calc = total_num - vlr_pago_calc
+
+        CACHE_CLIENTES.append({
+            "linha": row,
+            "nome": str(nome),
+            "contrato": str(sheet.cell(row=row, column=3).value or ""),     # Coluna C
+            "quitacao": str(sheet.cell(row=row, column=4).value or ""),     # Coluna D
+            "valor_pego": sheet.cell(row=row, column=6).value or 0,        # Coluna F (Vlr Solicitado)
+            "valor_parcela": sheet.cell(row=row, column=8).value or 0,     # Coluna H (Vlr. Diária / Parcela)
+            "valor_pago": vlr_pago_calc,                                   # Somatório exato das colunas diárias
+            "pendente": pendente_calc,                                     # Total - Pago
+            "multas": sheet.cell(row=row, column=12).value or 0,           # Coluna L (Multas)
+            "data_inicio": str(sheet.cell(row=row, column=13).value or ""),# Coluna M (Primeira)
+            "data_fim": str(sheet.cell(row=row, column=14).value or "")    # Coluna N (Última)
+        })
 
 def baixar_planilha_do_drive():
     url = f"https://drive.google.com/uc?export=download&id={DRIVE_FILE_ID}"
@@ -83,26 +110,28 @@ def lancar_noite():
         sheet = wb.active
         
         linha = dados.get('linha')
-        tipo = dados.get('tipo') 
+        tipo = dados.get('tipo') # "PIX", "ESPECIE", "ATRASO", "SEMANAL", "NEGOCIADO"
         valor = dados.get('valor', 0)
         
         CORES = {
             "PIX": PatternFill(start_color="6AA84F", end_color="6AA84F", fill_type="solid"),
             "ESPECIE": PatternFill(start_color="8E7CC3", end_color="8E7CC3", fill_type="solid"),
-            "ATRASO": PatternFill(start_color="CC0000", end_color="CC0000", fill_type="solid")
+            "ATRASO": PatternFill(start_color="CC0000", end_color="CC0000", fill_type="solid"),
+            "SEMANAL": PatternFill(start_color="1155CC", end_color="1155CC", fill_type="solid"),
+            "NEGOCIADO": PatternFill(start_color="EA9999", end_color="EA9999", fill_type="solid") # Rosa para negociado
         }
         
         col_out_vlr = sheet.max_column
         col_aberto = col_out_vlr - 1
         
-        if tipo in ["PIX", "ESPECIE"]:
+        if tipo in ["PIX", "ESPECIE", "SEMANAL"]:
             sheet.cell(row=linha, column=col_out_vlr, value=valor)
-            fill = CORES[tipo]
+            fill = CORES.get(tipo, CORES["PIX"])
             sheet.cell(row=linha, column=col_aberto).fill = fill
             sheet.cell(row=linha, column=col_out_vlr).fill = fill
             
-            pago_cell = sheet.cell(row=linha, column=10)   # Coluna J (Pago)
-            pendente_cell = sheet.cell(row=linha, column=11) # Coluna K (Pendente)
+            pago_cell = sheet.cell(row=linha, column=10)
+            pendente_cell = sheet.cell(row=linha, column=11)
             
             try:
                 if pago_cell.value is not None:
@@ -123,6 +152,13 @@ def lancar_noite():
             status = dados.get('status', 'A')
             sheet.cell(row=linha, column=col_out_vlr, value=status)
             fill = CORES["ATRASO"]
+            sheet.cell(row=linha, column=col_aberto).fill = fill
+            sheet.cell(row=linha, column=col_out_vlr).fill = fill
+
+        elif tipo == "NEGOCIADO":
+            texto_negocio = dados.get('texto', datetime.now().strftime("%d/%m"))
+            sheet.cell(row=linha, column=col_out_vlr, value=texto_negocio)
+            fill = CORES["NEGOCIADO"] # Rosa
             sheet.cell(row=linha, column=col_aberto).fill = fill
             sheet.cell(row=linha, column=col_out_vlr).fill = fill
 

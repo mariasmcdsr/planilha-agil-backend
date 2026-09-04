@@ -36,10 +36,17 @@
                 <h3 id="cliNome" class="font-bold text-emerald-300 text-base"></h3>
                 <span id="cliContrato" class="text-xs bg-slate-600 px-2 py-1 rounded text-slate-300"></span>
             </div>
-            <div class="grid grid-cols-2 gap-2 text-xs text-slate-300">
-                <div>Pego: <span id="cliPego" class="font-semibold text-white"></span></div>
-                <div>Pago: <span id="cliPago" class="font-semibold text-white"></span></div>
-                <div class="col-span-2 text-amber-300">Pendente: <span id="cliPendente" class="font-bold"></span></div>
+            
+            <div class="grid grid-cols-2 gap-2 text-xs text-slate-300 bg-slate-800/40 p-3 rounded-lg">
+                <div>Valor Pego: <span id="cliPego" class="font-semibold text-white"></span></div>
+                <div>Valor Pago: <span id="cliPago" class="font-semibold text-white"></span></div>
+                <div>Parcela: <span id="cliParcela" class="font-semibold text-white"></span></div>
+                <div>Multas: <span id="cliMultas" class="font-semibold text-white"></span></div>
+                <div>Início: <span id="cliInicio" class="font-semibold text-white"></span></div>
+                <div>Fim: <span id="cliFim" class="font-semibold text-white"></span></div>
+                <div class="col-span-2 text-amber-300 pt-2 border-t border-slate-600 text-sm">
+                    Pendente: <span id="cliPendente" class="font-bold"></span>
+                </div>
             </div>
 
             <!-- Botões de Lançamento Direto -->
@@ -49,6 +56,14 @@
                 </button>
                 <button onclick="lancar('ESPECIE')" class="bg-purple-600 hover:bg-purple-500 text-white font-medium py-2 px-3 rounded-lg text-xs transition">
                     🟣 Espécie
+                </button>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+                <button onclick="lancar('SEMANAL')" class="bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 px-3 rounded-lg text-xs transition">
+                    🔵 Semanal (Dia)
+                </button>
+                <button onclick="lancar('NEGOCIADO')" class="bg-pink-500 hover:bg-pink-400 text-white font-medium py-2 px-3 rounded-lg text-xs transition">
+                    🌸 Negociado (Rosa)
                 </button>
             </div>
             <button onclick="lancar('ATRASO')" class="w-full bg-red-600 hover:bg-red-500 text-white font-medium py-2 px-3 rounded-lg text-xs transition">
@@ -74,9 +89,13 @@
             if (res.ok) {
                 clienteAtual = data;
                 document.getElementById('cliNome').innerText = data.nome;
-                document.getElementById('cliContrato').innerText = "Contrato: " + data.contrato;
+                document.getElementById('cliContrato').innerText = data.contrato;
                 document.getElementById('cliPego').innerText = "R$ " + data.valor_pego;
                 document.getElementById('cliPago').innerText = "R$ " + data.valor_pago;
+                document.getElementById('cliParcela').innerText = "R$ " + data.valor_parcela;
+                document.getElementById('cliMultas').innerText = "R$ " + data.multas;
+                document.getElementById('cliInicio').innerText = data.data_inicio;
+                document.getElementById('cliFim').innerText = data.data_fim;
                 document.getElementById('cliPendente').innerText = "R$ " + data.pendente;
                 
                 document.getElementById('cartaoCliente').classList.remove('hidden');
@@ -92,12 +111,22 @@
 
             let valor = 0;
             let statusAtraso = 'A';
+            let textoNegocio = '';
 
-            if (tipo !== 'ATRASO') {
+            if (tipo === 'PIX' || tipo === 'ESPECIE') {
                 let valStr = prompt("Digite o valor recebido (R$):");
                 if (!valStr) return;
                 valor = parseFloat(valStr);
-            } else {
+            } else if (tipo === 'SEMANAL') {
+                let valStr = prompt("Digite o valor e/ou o dia da semana (ex: 75 - Sexta):");
+                if (!valStr) return;
+                // Tenta extrair número se houver, ou aceita como valor/texto
+                let matchNum = valStr.match(/[0-9.]+/);
+                valor = matchNum ? parseFloat(matchNum[0]) : 0;
+            } else if (tipo === 'NEGOCIADO') {
+                textoNegocio = prompt("Digite a data ou anotação do Negociado (Ex: 05/09 ou Acordo):", "05/09");
+                if (!textoNegocio) return;
+            } else if (tipo === 'ATRASO') {
                 statusAtraso = prompt("Digite o status de atraso (A, AA, AAA, etc):", "A");
                 if (!statusAtraso) return;
             }
@@ -106,12 +135,18 @@
             let res = await fetch('/api/lancar-noite', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({linha: clienteAtual.linha, tipo: tipo, valor: valor, status: statusAtraso})
+                body: JSON.stringify({
+                    linha: clienteAtual.linha, 
+                    tipo: tipo, 
+                    valor: valor, 
+                    status: statusAtraso,
+                    texto: textoNegocio
+                })
             });
             let data = await res.json();
             document.getElementById('status').innerText = data.mensagem || data.erro;
             if (res.ok) {
-                setTimeout(buscarCliente, 1000); // Atualiza os dados na tela
+                setTimeout(buscarCliente, 800); 
             }
         }
 
