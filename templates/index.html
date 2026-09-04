@@ -45,7 +45,7 @@
                 <div>Início: <span id="cliInicio" class="font-semibold text-white"></span></div>
                 <div>Fim: <span id="cliFim" class="font-semibold text-white"></span></div>
                 <div class="col-span-2 text-amber-300 pt-2 border-t border-slate-600 text-sm">
-                    Pendente: <span id="cliPendente" class="font-bold"></span>
+                    Pendente: <span id="cliPendente" class="font-bold text-base"></span>
                 </div>
             </div>
 
@@ -78,6 +78,11 @@
     <script>
         let clienteAtual = null;
 
+        // Formata os números em reais (ex: R$ 1.500,00)
+        const formataMoeda = (valor) => {
+            return Number(valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        };
+
         async function buscarCliente() {
             let nome = document.getElementById('buscaNome').value;
             if (!nome) return alert("Digite um nome para buscar!");
@@ -90,13 +95,13 @@
                 clienteAtual = data;
                 document.getElementById('cliNome').innerText = data.nome;
                 document.getElementById('cliContrato').innerText = data.contrato;
-                document.getElementById('cliPego').innerText = "R$ " + data.valor_pego;
-                document.getElementById('cliPago').innerText = "R$ " + data.valor_pago;
-                document.getElementById('cliParcela').innerText = "R$ " + data.valor_parcela;
-                document.getElementById('cliMultas').innerText = "R$ " + data.multas;
+                document.getElementById('cliPego').innerText = formataMoeda(data.valor_pego);
+                document.getElementById('cliPago').innerText = formataMoeda(data.valor_pago);
+                document.getElementById('cliParcela').innerText = formataMoeda(data.valor_parcela);
+                document.getElementById('cliMultas').innerText = formataMoeda(data.multas);
                 document.getElementById('cliInicio').innerText = data.data_inicio;
                 document.getElementById('cliFim').innerText = data.data_fim;
-                document.getElementById('cliPendente').innerText = "R$ " + data.pendente;
+                document.getElementById('cliPendente').innerText = formataMoeda(data.pendente);
                 
                 document.getElementById('cartaoCliente').classList.remove('hidden');
                 document.getElementById('status').innerText = "";
@@ -109,23 +114,23 @@
         async function lancar(tipo) {
             if (!clienteAtual) return;
 
-            let valor = 0;
+            let valorNum = 0;
             let statusAtraso = 'A';
-            let textoNegocio = '';
+            let textoLivre = '';
 
             if (tipo === 'PIX' || tipo === 'ESPECIE') {
                 let valStr = prompt("Digite o valor recebido (R$):");
                 if (!valStr) return;
-                valor = parseFloat(valStr);
+                valorNum = parseFloat(valStr.replace(',', '.'));
             } else if (tipo === 'SEMANAL') {
                 let valStr = prompt("Digite o valor e/ou o dia da semana (ex: 75 - Sexta):");
                 if (!valStr) return;
-                // Tenta extrair número se houver, ou aceita como valor/texto
-                let matchNum = valStr.match(/[0-9.]+/);
-                valor = matchNum ? parseFloat(matchNum[0]) : 0;
+                let match = valStr.match(/[0-9.,]+/);
+                valorNum = match ? parseFloat(match[0].replace(',', '.')) : 0;
+                textoLivre = valStr; 
             } else if (tipo === 'NEGOCIADO') {
-                textoNegocio = prompt("Digite a data ou anotação do Negociado (Ex: 05/09 ou Acordo):", "05/09");
-                if (!textoNegocio) return;
+                textoLivre = prompt("Digite a data ou anotação do Negociado (Ex: 05/09 ou Acordo):", "05/09");
+                if (!textoLivre) return;
             } else if (tipo === 'ATRASO') {
                 statusAtraso = prompt("Digite o status de atraso (A, AA, AAA, etc):", "A");
                 if (!statusAtraso) return;
@@ -138,15 +143,17 @@
                 body: JSON.stringify({
                     linha: clienteAtual.linha, 
                     tipo: tipo, 
-                    valor: valor, 
+                    valor: valorNum, 
                     status: statusAtraso,
-                    texto: textoNegocio
+                    texto: textoLivre
                 })
             });
+            
             let data = await res.json();
             document.getElementById('status').innerText = data.mensagem || data.erro;
             if (res.ok) {
-                setTimeout(buscarCliente, 800); 
+                // Atualiza a tela quase instantaneamente
+                setTimeout(buscarCliente, 400); 
             }
         }
 

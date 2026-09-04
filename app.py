@@ -4,6 +4,7 @@ from flask import Flask, jsonify, request, render_template
 import openpyxl
 from openpyxl.styles import PatternFill
 from datetime import datetime
+import re
 
 app = Flask(__name__)
 
@@ -12,11 +13,34 @@ EXCEL_PATH = "planilha_atual.xlsx"
 
 CACHE_CLIENTES = []
 
+def extrair_numero(val):
+    if val is None: return 0.0
+    if isinstance(val, (int, float)): return float(val)
+    val_str = str(val).strip()
+    if val_str.startswith('='): return 0.0 # Ignora fórmulas não calculadas
+    
+    val_str = re.sub(r'[^\d,\.-]', '', val_str)
+    if '.' in val_str and ',' in val_str:
+        val_str = val_str.replace('.', '').replace(',', '.')
+    elif ',' in val_str:
+        val_str = val_str.replace(',', '.')
+    try:
+        return float(val_str)
+    except:
+        return 0.0
+
+def formatar_data(val):
+    if not val: return ""
+    if isinstance(val, datetime):
+        return val.strftime("%d/%m/%Y")
+    return str(val).split(' ')[0] # Remove os 00:00:00 se houver
+
 def carregar_cache():
     global CACHE_CLIENTES
     if not os.path.exists(EXCEL_PATH):
         baixar_planilha_do_drive()
     
+    # data_only=True garante que ele tente pegar o valor final e não a fórmula em texto
     wb = openpyxl.load_workbook(EXCEL_PATH, data_only=True)
     sheet = wb.active
     
@@ -25,42 +49,20 @@ def carregar_cache():
         col_a = sheet.cell(row=row, column=1).value
         nome = sheet.cell(row=row, column=2).value
         
-        # Ignora cabeçalhos e linhas de categorias (como COBRADOR, SUMIDOS, NEGOCIADOS, etc.)
         if not nome or col_a is None or not str(col_a).strip().isdigit():
             continue
             
-        # Calcula o valor pago somando as colunas diárias (da coluna 15 em diante) para garantir precisão exata
-        vlr_pago_calc = 0
-        for col in range(15, sheet.max_column + 1):
-            val = sheet.cell(row=row, column=col).value
-            try:
-                if val is not None and isinstance(val, (int, float)):
-                    vlr_pago_calc += float(val)
-                elif val is not None and str(val).replace('.', '', 1).isdigit():
-                    vlr_pago_calc += float(val)
-            except:
-                pass
-
-        total = sheet.cell(row=row, column=9).value or 0 # Coluna I (Total)
-        try:
-            total_num = float(total)
-        except:
-            total_num = 0
-
-        pendente_calc = total_num - vlr_pago_calc
-
         CACHE_CLIENTES.append({
             "linha": row,
-            "nome": str(nome),
-            "contrato": str(sheet.cell(row=row, column=3).value or ""),     # Coluna C
-            "quitacao": str(sheet.cell(row=row, column=4).value or ""),     # Coluna D
-            "valor_pego": sheet.cell(row=row, column=6).value or 0,        # Coluna F (Vlr Solicitado)
-            "valor_parcela": sheet.cell(row=row, column=8).value or 0,     # Coluna H (Vlr. Diária / Parcela)
-            "valor_pago": vlr_pago_calc,                                   # Somatório exato das colunas diárias
-            "pendente": pendente_calc,                                     # Total - Pago
-            "multas": sheet.cell(row=row, column=12).value or 0,           # Coluna L (Multas)
-            "data_inicio": str(sheet.cell(row=row, column=13).value or ""),# Coluna M (Primeira)
-            "data_fim": str(sheet.cell(row=row, column=14).value or "")    # Coluna N (Última)
+            "nome": str(nome).strip(),
+            "contrato": str(sheet.cell(row=row, column=3).value or ""),
+            "valor_pego": extrair_numero(sheet.cell(row=row, column=6).value),    # Coluna F
+            "valor_parcela": extrair_numero(sheet.cell(row=row, column=8).value), # Coluna H
+            "valor_pago": extrair_numero(sheet.cell(row=row, column=10).value),   # Coluna J
+            "pendente": extrair_numero(sheet.cell(row=row, column=11).value),     # Coluna K
+            "multas": extrair_numero(sheet.cell(row=row, column=12).value),       # Coluna L
+            "data_inicio": formatar_data(sheet.cell(row=row, column=13).value),   # Coluna M
+            "data_fim": formatar_data(sheet.cell(row=row, column=14).value)       # Coluna N
         })
 
 def baixar_planilha_do_drive():
@@ -110,44 +112,41 @@ def lancar_noite():
         sheet = wb.active
         
         linha = dados.get('linha')
-        tipo = dados.get('tipo') # "PIX", "ESPECIE", "ATRASO", "SEMANAL", "NEGOCIADO"
-        valor = dados.get('valor', 0)
+        tipo = dados.get('tipo') 
+        valor_num = extrair_numero(dados.get('valor', 0))
+        texto = dados.get('texto', str(valor_num))
         
         CORES = {
             "PIX": PatternFill(start_color="6AA84F", end_color="6AA84F", fill_type="solid"),
             "ESPECIE": PatternFill(start_color="8E7CC3", end_color="8E7CC3", fill_type="solid"),
             "ATRASO": PatternFill(start_color="CC0000", end_color="CC0000", fill_type="solid"),
             "SEMANAL": PatternFill(start_color="1155CC", end_color="1155CC", fill_type="solid"),
-            "NEGOCIADO": PatternFill(start_color="EA9999", end_color="EA9999", fill_type="solid") # Rosa para negociado
+            "NEGOCIADO": PatternFill(start_color="EA9999", end_color="EA9999", fill_type="solid")
         }
         
         col_out_vlr = sheet.max_column
         col_aberto = col_out_vlr - 1
         
         if tipo in ["PIX", "ESPECIE", "SEMANAL"]:
-            sheet.cell(row=linha, column=col_out_vlr, value=valor)
+            # Se for semanal e tiver texto, lança o texto (ex: 75 - Sexta). Se não, lança o número.
+            valor_final_planilha = texto if tipo == "SEMANAL" else valor_num
+            sheet.cell(row=linha, column=col_out_vlr, value=valor_final_planilha)
+            
             fill = CORES.get(tipo, CORES["PIX"])
             sheet.cell(row=linha, column=col_aberto).fill = fill
             sheet.cell(row=linha, column=col_out_vlr).fill = fill
             
+            # Tenta atualizar fisicamente as células 10 e 11 se NÃO forem fórmulas
             pago_cell = sheet.cell(row=linha, column=10)
+            if not str(pago_cell.value).startswith('='):
+                pago_cell.value = extrair_numero(pago_cell.value) + valor_num
+                
             pendente_cell = sheet.cell(row=linha, column=11)
-            
-            try:
-                if pago_cell.value is not None:
-                    pago_cell.value = float(pago_cell.value) + float(valor)
-                else:
-                    pago_cell.value = float(valor)
-                    
-                if pendente_cell.value is not None:
-                    novo_pendente = float(pendente_cell.value) - float(valor)
-                    pendente_cell.value = novo_pendente
-            except:
-                pass
-                
-            if pendente_cell.value is not None and float(pendente_cell.value) <= 0:
-                sheet.cell(row=linha, column=4, value=datetime.now().strftime("%d/%m/%Y"))
-                
+            if not str(pendente_cell.value).startswith('='):
+                pendente_cell.value = extrair_numero(pendente_cell.value) - valor_num
+                if pendente_cell.value <= 0:
+                    sheet.cell(row=linha, column=4, value=datetime.now().strftime("%d/%m/%Y"))
+
         elif tipo == "ATRASO":
             status = dados.get('status', 'A')
             sheet.cell(row=linha, column=col_out_vlr, value=status)
@@ -156,14 +155,21 @@ def lancar_noite():
             sheet.cell(row=linha, column=col_out_vlr).fill = fill
 
         elif tipo == "NEGOCIADO":
-            texto_negocio = dados.get('texto', datetime.now().strftime("%d/%m"))
-            sheet.cell(row=linha, column=col_out_vlr, value=texto_negocio)
-            fill = CORES["NEGOCIADO"] # Rosa
+            sheet.cell(row=linha, column=col_out_vlr, value=texto)
+            fill = CORES["NEGOCIADO"]
             sheet.cell(row=linha, column=col_aberto).fill = fill
             sheet.cell(row=linha, column=col_out_vlr).fill = fill
 
         wb.save(EXCEL_PATH)
-        carregar_cache() 
+
+        # ATUALIZA A MEMÓRIA NA HORA PARA O CELULAR SOMAR CORRETAMENTE!
+        for cliente in CACHE_CLIENTES:
+            if cliente['linha'] == linha:
+                if tipo in ["PIX", "ESPECIE", "SEMANAL"]:
+                    cliente['valor_pago'] += valor_num
+                    cliente['pendente'] -= valor_num
+                break
+                
         return jsonify({"mensagem": "Lançamento realizado instantaneamente!"})
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
@@ -184,7 +190,7 @@ def lancar_manha():
         
         for row in range(5, nova_aba.max_row + 1):
             pendente = nova_aba.cell(row=row, column=11).value
-            if pendente is not None and float(pendente) == 0:
+            if pendente is not None and extrair_numero(pendente) <= 0:
                 for col in range(2, 15):
                     nova_aba.cell(row=row, column=col).fill = COR_QUITADO
                     
