@@ -18,7 +18,7 @@ def extrair_numero(val):
     if isinstance(val, (int, float)): return float(val)
     
     val_str = str(val).split('-')[0].strip()
-    if val_str.startswith('='): return 0.0 # Se for fórmula, vamos usar a inteligência do cache
+    if val_str.startswith('='): return 0.0
     
     val_str = re.sub(r'[^\d,\.]', '', val_str)
     if not val_str: return 0.0
@@ -101,10 +101,14 @@ def buscar_cliente():
     if not CACHE_CLIENTES:
         carregar_cache()
         
+    matches = []
     for cliente in CACHE_CLIENTES:
-        partes_nome = cliente['nome'].lower().split()
-        if any(p.startswith(nome_busca) or nome_busca in p for p in partes_nome):
-            return jsonify(cliente)
+        # Permite buscar por partes ou nome completo (inclusive com espaços)
+        if nome_busca in cliente['nome'].lower():
+            matches.append(cliente)
+            
+    if matches:
+        return jsonify(matches)
             
     return jsonify({"erro": "Cliente não encontrado!"}), 404
 
@@ -143,7 +147,6 @@ def lancar_noite():
             sheet.cell(row=linha, column=col_aberto).fill = fill
             sheet.cell(row=linha, column=col_out_vlr).fill = fill
             
-            # Puxa o valor correto armazenado na memória, e não a fórmula do Excel
             pago_atual = 0
             pendente_atual = 0
             cliente_alvo = None
@@ -158,14 +161,12 @@ def lancar_noite():
             novo_pago = pago_atual + valor_num
             novo_pendente = pendente_atual - valor_num
             
-            # Escreve NÚMEROS ABSOLUTOS nas colunas Pago (10) e Pendente (11) ignorando a fórmula antiga
             sheet.cell(row=linha, column=10, value=novo_pago)
             sheet.cell(row=linha, column=11, value=novo_pendente)
             
             if novo_pendente <= 0:
                 sheet.cell(row=linha, column=4, value=datetime.now().strftime("%d/%m/%Y"))
                 
-            # Atualiza também a memória para tela mostrar instantaneamente a soma
             if cliente_alvo:
                 cliente_alvo['valor_pago'] = novo_pago
                 cliente_alvo['pendente'] = novo_pendente

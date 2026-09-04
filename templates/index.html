@@ -37,38 +37,43 @@
                 <span id="cliContrato" class="text-xs bg-slate-600 px-2 py-1 rounded text-slate-300"></span>
             </div>
             
-            <div class="grid grid-cols-2 gap-2 text-xs text-slate-300 bg-slate-800/40 p-3 rounded-lg">
-                <div>Valor Pego: <span id="cliPego" class="font-semibold text-white"></span></div>
-                <div>Valor Pago: <span id="cliPago" class="font-semibold text-white"></span></div>
-                <div>Parcela: <span id="cliParcela" class="font-semibold text-white"></span></div>
-                <div>Multas: <span id="cliMultas" class="font-semibold text-white"></span></div>
-                <div>Início: <span id="cliInicio" class="font-semibold text-white"></span></div>
-                <div>Fim: <span id="cliFim" class="font-semibold text-white"></span></div>
-                <div class="col-span-2 text-amber-300 pt-2 border-t border-slate-600 text-sm">
-                    Pendente: <span id="cliPendente" class="font-bold text-base"></span>
+            <!-- Conteúdo Dinâmico (Detalhes ou Lista de Seleção) -->
+            <div id="detalhesCliente">
+                <div class="grid grid-cols-2 gap-2 text-xs text-slate-300 bg-slate-800/40 p-3 rounded-lg">
+                    <div>Valor Pego: <span id="cliPego" class="font-semibold text-white"></span></div>
+                    <div>Valor Pago: <span id="cliPago" class="font-semibold text-white"></span></div>
+                    <div>Parcela: <span id="cliParcela" class="font-semibold text-white"></span></div>
+                    <div>Multas: <span id="cliMultas" class="font-semibold text-white"></span></div>
+                    <div>Início: <span id="cliInicio" class="font-semibold text-white"></span></div>
+                    <div>Fim: <span id="cliFim" class="font-semibold text-white"></span></div>
+                    <div class="col-span-2 text-amber-300 pt-2 border-t border-slate-600 text-sm">
+                        Pendente: <span id="cliPendente" class="font-bold text-base"></span>
+                    </div>
                 </div>
             </div>
 
             <!-- Botões de Lançamento Direto -->
-            <div class="grid grid-cols-2 gap-2 pt-2">
-                <button onclick="lancar('PIX')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2 px-3 rounded-lg text-xs transition">
-                    🟢 PIX
-                </button>
-                <button onclick="lancar('ESPECIE')" class="bg-purple-600 hover:bg-purple-500 text-white font-medium py-2 px-3 rounded-lg text-xs transition">
-                    🟣 Espécie
+            <div id="botoesAcao" class="space-y-2 pt-2">
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="lancar('PIX')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2 px-3 rounded-lg text-xs transition">
+                        🟢 PIX
+                    </button>
+                    <button onclick="lancar('ESPECIE')" class="bg-purple-600 hover:bg-purple-500 text-white font-medium py-2 px-3 rounded-lg text-xs transition">
+                        🟣 Espécie
+                    </button>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="lancar('SEMANAL')" class="bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 px-3 rounded-lg text-xs transition">
+                        🔵 Semanal (Dia)
+                    </button>
+                    <button onclick="lancar('NEGOCIADO')" class="bg-pink-500 hover:bg-pink-400 text-white font-medium py-2 px-3 rounded-lg text-xs transition">
+                        🌸 Negociado (Rosa)
+                    </button>
+                </div>
+                <button onclick="lancar('ATRASO')" class="w-full bg-red-600 hover:bg-red-500 text-white font-medium py-2 px-3 rounded-lg text-xs transition">
+                    🔴 Marcar Atraso (A / AA / AAA)
                 </button>
             </div>
-            <div class="grid grid-cols-2 gap-2">
-                <button onclick="lancar('SEMANAL')" class="bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 px-3 rounded-lg text-xs transition">
-                    🔵 Semanal (Dia)
-                </button>
-                <button onclick="lancar('NEGOCIADO')" class="bg-pink-500 hover:bg-pink-400 text-white font-medium py-2 px-3 rounded-lg text-xs transition">
-                    🌸 Negociado (Rosa)
-                </button>
-            </div>
-            <button onclick="lancar('ATRASO')" class="w-full bg-red-600 hover:bg-red-500 text-white font-medium py-2 px-3 rounded-lg text-xs transition">
-                🔴 Marcar Atraso (A / AA / AAA)
-            </button>
         </div>
 
         <!-- Status / Resposta -->
@@ -77,8 +82,8 @@
 
     <script>
         let clienteAtual = null;
+        let listaResultados = [];
 
-        // Formata os números em reais (ex: R$ 1.500,00)
         const formataMoeda = (valor) => {
             return Number(valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
         };
@@ -92,23 +97,58 @@
             let data = await res.json();
 
             if (res.ok) {
-                clienteAtual = data;
-                document.getElementById('cliNome').innerText = data.nome;
-                document.getElementById('cliContrato').innerText = data.contrato;
-                document.getElementById('cliPego').innerText = formataMoeda(data.valor_pego);
-                document.getElementById('cliPago').innerText = formataMoeda(data.valor_pago);
-                document.getElementById('cliParcela').innerText = formataMoeda(data.valor_parcela);
-                document.getElementById('cliMultas').innerText = formataMoeda(data.multas);
-                document.getElementById('cliInicio').innerText = data.data_inicio;
-                document.getElementById('cliFim').innerText = data.data_fim;
-                document.getElementById('cliPendente').innerText = formataMoeda(data.pendente);
-                
-                document.getElementById('cartaoCliente').classList.remove('hidden');
-                document.getElementById('status').innerText = "";
+                listaResultados = data;
+                if (data.length === 1) {
+                    carregarCartaoCliente(data[0]);
+                } else {
+                    // Múltiplos resultados (ex: mais de um Renato)
+                    let container = document.getElementById('cartaoCliente');
+                    container.classList.remove('hidden');
+                    
+                    document.getElementById('cliNome').innerText = `Encontrados (${data.length}):`;
+                    document.getElementById('cliContrato').innerText = "Escolha abaixo";
+                    
+                    let htmlLista = `<div class="space-y-2 py-1"><p class="text-xs text-amber-300">Mais de um cliente encontrado. Clique no correto:</p><div class="space-y-1 max-h-48 overflow-y-auto">`;
+                    data.forEach((cli, index) => {
+                        htmlLista += `<button onclick="escolherCliente(${index})" class="w-full text-left bg-slate-800 hover:bg-slate-600 p-2 rounded text-xs text-emerald-300 flex justify-between items-center transition"><span>${cli.nome}</span> <span class="text-slate-400 font-mono">${cli.contrato}</span></button>`;
+                    });
+                    htmlLista += `</div></div>`;
+                    
+                    document.getElementById('detalhesCliente').innerHTML = htmlLista;
+                    document.getElementById('botoesAcao').classList.add('hidden');
+                    document.getElementById('status').innerText = "";
+                }
             } else {
                 document.getElementById('cartaoCliente').classList.add('hidden');
                 document.getElementById('status').innerText = data.erro;
             }
+        }
+
+        function escolherCliente(index) {
+            carregarCartaoCliente(listaResultados[index]);
+        }
+
+        function carregarCartaoCliente(data) {
+            clienteAtual = data;
+            document.getElementById('cliNome').innerText = data.nome;
+            document.getElementById('cliContrato').innerText = data.contrato;
+            
+            document.getElementById('detalhesCliente').innerHTML = `
+                <div class="grid grid-cols-2 gap-2 text-xs text-slate-300 bg-slate-800/40 p-3 rounded-lg">
+                    <div>Valor Pego: <span class="font-semibold text-white">${formataMoeda(data.valor_pego)}</span></div>
+                    <div>Valor Pago: <span class="font-semibold text-white">${formataMoeda(data.valor_pago)}</span></div>
+                    <div>Parcela: <span class="font-semibold text-white">${formataMoeda(data.valor_parcela)}</span></div>
+                    <div>Multas: <span class="font-semibold text-white">${formataMoeda(data.multas)}</span></div>
+                    <div>Início: <span class="font-semibold text-white">${data.data_inicio}</span></div>
+                    <div>Fim: <span class="font-semibold text-white">${data.data_fim}</span></div>
+                    <div class="col-span-2 text-amber-300 pt-2 border-t border-slate-600 text-sm">
+                        Pendente: <span class="font-bold text-base">${formataMoeda(data.pendente)}</span>
+                    </div>
+                </div>
+            `;
+            document.getElementById('botoesAcao').classList.remove('hidden');
+            document.getElementById('cartaoCliente').classList.remove('hidden');
+            document.getElementById('status').innerText = "";
         }
 
         async function lancar(tipo) {
@@ -152,8 +192,11 @@
             let data = await res.json();
             document.getElementById('status').innerText = data.mensagem || data.erro;
             if (res.ok) {
-                // Atualiza a tela quase instantaneamente
-                setTimeout(buscarCliente, 400); 
+                // Atualiza o cartão atual para refletir a nova soma
+                setTimeout(() => {
+                    let nomeBusca = document.getElementById('buscaNome').value;
+                    buscarCliente();
+                }, 400); 
             }
         }
 
